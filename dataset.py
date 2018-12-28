@@ -15,6 +15,7 @@ import pickle as pickle
 import numpy as np
 import pandas as pd
 from collections import OrderedDict
+import shutil
 
 class DataSet(object):
     '''This class is used to arrange dataset, collected and used by Lab 119 in HIT.
@@ -25,12 +26,16 @@ class DataSet(object):
             info: An OrderedDict contained all the attribution of dataset.
             save_path: A string described where to save or load this dataset, and defaulted as './data/'
             dataset: A list contained samples and their attributes.
+            save_in_piece: A bool to decide if save dataset in piece
     '''
-    def __init__(self,name='',info=OrderedDict(),save_path='./data/',dataset=[]):
+    def __init__(self,name='',info=OrderedDict(),save_path='./data/',dataset=[],len_data=0,load_name=''):
         self.name = name
         self.info = info
         self.save_path = save_path
         self.dataset = dataset
+        self.len_data = len_data
+        self.load_name = load_name
+        self.save_in_piece = False
 
     # inner function
     def _deal_condition(self,condition):
@@ -47,16 +52,9 @@ class DataSet(object):
         idx_all = []
         for k in condition.keys():
             idx_all.append(set([i for i,x in enumerate(self.info[k]) if x in condition[k]]))
-        conforming_idx = [True]*len(self.dataset)
-        for x in idx_all:
-            conforming_idx = conforming_idx and x
-        return conforming_idx
+        return list(set.intersection(*idx_all))
 
     # modify
-    def reset_index(self,index):
-        assert isinstance(index,list)
-        self.index = index
-
     def add_index(self,new_attribute,new_value=None):
         '''
         Add new attribute to dataset.
@@ -70,17 +68,13 @@ class DataSet(object):
         Return:
             None
         '''
-        self.index.append(new_attribute)
         if new_value == None:
-            for x in self.dataset:
-                x.append(new_value)
+            self.info[new_attribute] = [None]*self.len_data
         elif isinstance(new_value,list):
             if len(new_value) == 1:
-                for i in range(len(self.dataset)):
-                    self.dataset[i].append(new_value[0])
-            elif len(new_value) == len(self.dataset):
-                for i in range(len(self.dataset)):
-                    self.dataset[i].append(new_value[i])
+                self.info[new_attribute] = new_value*self.len_data
+            elif len(new_value) == self.len_data:
+                self.info[new_attribute] = new_value
             else:
                 raise TypeError
 
@@ -93,39 +87,36 @@ class DataSet(object):
         Return:
             None
         '''
-        try:
-            idx = self.index.index(del_attribute)
-            for x in self.dataset:
-                del(x[idx])
-            self.index.remove(del_attribute)
-        except ValueError:
-            raise ValueError
-            print('The given attribute does not exist in index, and the attributes of this dataset \
-                is ', self.index)
+        del self.info[del_attribute]
 
     def append(self,append_data):
         '''
-        Append samples.
+        Append one sample.
         
         Args:
             append_data: A dict or a list that contain a sample, including data and attribute.
+                If append_data is a list, then data should be the first element, and the other elements should be in order.
         Return:
             None
         '''
         if isinstance(append_data,dict):
-            if len(append_data.keys()) <= len(self.index):
-                append_data_list = []
-                for x in self.index:
-                    if x in list(append_data.keys()):
-                        append_data_list.append(append_data[x])
+            if len(append_data.keys()) <= len(self.info.keys())+1:
+                for k in append_data.keys():
+                    if k == 'data':
+                        self.dataset.append(append_data[k])
+                    elif k not in self.info.keys():
+                        self.info[k] = [None]*(self.len_data+1)
                     else:
-                        append_data_list.append(None)
-                self.dataset.append(append_data_list)
+                        self.info[k].append(append_data[k])
+                self.len_data += 1
             else:
                 raise ValueError('append_data has too much attribute!')
         elif isinstance(append_data,list):
-            if len(append_data) == len(self.index):
-                self.dataset.append(append_data)
+            if len(append_data) == len(self.info.keys())+1:
+                self.dataset.append(append_data.pop(0))
+                for k in self.info.keys():
+                    self.info[k].append(append_data.pop(0))
+                self.len_data += 1
             else:
                 raise ValueError('append_data has wrong number of attribute!')
         else:
@@ -141,11 +132,29 @@ class DataSet(object):
             None
         '''
         conforming_idx = self._deal_condition(condition)
-        for i,x in enumerate(self.dataset):
-            if conforming_idx[i]:
-                self.dataset.pop(x)
+        keep_idx = list(set([i for i in range(self.len_data)]) - set(conforming_idx))
+        self.dataset = self.dataset[keep_idx]
+        for k in range(self.info.keys()):
+            self.info[k] = self.info[k][keep_idx]
 
     # get information or values
+    def _get_data(self,idx_list):
+        '''
+        get data from dataset
+        Args:
+            idx_list: required dataset index
+        Return:
+            A list contained required data
+        '''
+        if self.save_in_piece:
+            data_path = self.save_path + 'DataSet_' + self.name + '/'
+            r_data = []
+            for i in idx_list:
+                r_data.append(np.load(data_path + self.info['file_name'][i] + '.npy'))
+            return r_data
+        else:
+            return self.dataset[idx_list]
+
     def get_value_attribute(self,attribute):
         '''
         get values under the given attribute of each data
@@ -157,12 +166,10 @@ class DataSet(object):
             A list of values under the given attribute with the same order as samples in dataset.
         '''
         try:
-            idx = self.index.index(attribute)
-            return [x[idx] for x in self.dataset]
-        except ValueError:
-            raise ValueError
-            print('The given attribute does not exist in index, and the attributes of this dataset \
-                is ', self.index)
+            return self.info[attribute]
+        except KeyError:
+            raise ValueError('The given attribute does not exist in index, and the attributes of this dataset \
+                is '+ str(list(self.info.keys())))
 
     def get_value(self,attribute,condition={}):
         '''
@@ -175,8 +182,14 @@ class DataSet(object):
             A list contrained values by given attribute and condition.
         '''
         conforming_idx = self._deal_condition(condition)
-        idx = self.index.index(attribute)
-        return [x[idx] for i,x in enumerate(self.dataset) if conforming_idx[i]]
+        if attribute == 'data':
+            return self._get_data(conforming_idx)
+        else:
+            try:
+                return self.info[attribute][conforming_idx]
+            except KeyError:
+                raise ValueError('The given attribute does not exist in index, and the attributes of this dataset \
+                    is '+ str(list(self.info.keys())))
 
     def get_dataset(self,condition={}):
         '''
@@ -188,8 +201,12 @@ class DataSet(object):
             A DataSet contrained values by given condition.
         '''
         conforming_idx = self._deal_condition(condition)
-        return DataSet(name='temp',index=self.index,
-                        dataset=[x for i,x in enumerate(self.dataset) if conforming_idx[i]])
+        temp_data = self._get_data(conforming_idx)
+        temp_info = OrderedDict()
+        for k in self.info.keys():
+            temp_info[k] = self.info[k][conforming_idx]
+        temp_len_data = len(conforming_idx)
+        return DataSet(name='temp',info=temp_info,dataset=temp_data,len_data=temp_len_data,load_name=self.load_name)
 
     def get_random_choice(self):
         '''
@@ -200,10 +217,11 @@ class DataSet(object):
         Return:
             A dict like {Attribute_1:Values,...}.
         '''
-        r = {}
-        data = random.choice(self.dataset)
-        for i,k in enumerate(self.index):
-            r[k] = data[i]
+        r = OrderedDict()
+        ran_idx = random.randint(0,self.len_data-1)
+        r['data'] = self._get_data(ran_idx)
+        for k in self.info.keys():
+            r[k] = self.info[k][ran_idx]
         return r
 
     def get_random_samples(self,n=1):
@@ -215,46 +233,13 @@ class DataSet(object):
         Return:
             A Dataset with same index but only one sample.
         '''
-        return DataSet(name='temp',index=self.index,dataset=random.sample(self.dataset,n))
-    
-    # value process
-    def normalization(self,attribute,select='std'):
-        idx = self.index.index(attribute)
-        for i in range(len(self.dataset)):
-            if select == 'fft':
-                self.dataset[i][idx] = self.dataset[i][idx] / np.max(self.dataset[i][idx])
-            else:
-                self.dataset[i][idx] = self.dataset[i][idx] - np.mean(self.dataset[i][idx])
-                if select == 'min-max':
-                    self.dataset[i][idx] = self.dataset[i][idx] / max(np.max(self.dataset[i][idx]),abs(np.min(self.dataset[i][idx])))
-                elif select == 'std':
-                    self.dataset[i][idx] = self.dataset[i][idx] / np.std(self.dataset[i][idx])
-                else:
-                    raise ValueError
-
-    # class operation
-    def shuffle(self):
-        random.shuffle(self.dataset)
-
-    def random_sample(self,n):
-        if isinstance(n,str):
-            if n == 'all':
-                self.shuffle()
-            elif n == 'half':
-                self.dataset = random.sample(self.dataset,int(len(self.dataset)/2))
-            else:
-                raise ValueError('n should be \'all\' or \'half\'!')
-        elif isinstance(n,int):
-            if n >= len(self.dataset):
-                self.shuffle()
-            else:
-                self.dataset = random.sample(self.dataset,n)
-        else:
-            raise TypeError('n should be int of string!')
-
-    def dataset_filter(self,condition={}):
-        conforming_idx = self._deal_condition(condition)
-        self.dataset = [x for i,x in enumerate(self.dataset) if conforming_idx[i]]
+        ran_idx = [random.randint(0,self.len_data-1) for _ in range(n)]
+        temp_data = self._get_data(ran_idx)
+        temp_info = OrderedDict()
+        for k in self.info.keys():
+            temp_info[k] = self.info[k][ran_idx]
+        temp_len_data = len(ran_idx)
+        return DataSet(name='temp',info=temp_info,dataset=temp_data,len_data=temp_len_data,load_name=self.load_name)
 
     def save(self,piece=False):
         '''
@@ -267,33 +252,43 @@ class DataSet(object):
         '''
         assert self.name != ''
         assert self.save_path != ''
-        pickle.dump(self, open(self.save_path + 'DataSet_' +
-                                     self.name + '.pkl', 'wb'), True)
-        self._save_info()
+        if piece:
+            self.save_in_piece = True
+            if self.name != self.load_name:
+                data_path = self.save_path + 'DataSet_' + self.name
+                if os.path.exists(data_path):
+                    shutil.rmtree(data_path)
+                    os.makedirs(data_path)
+                else:
+                    os.makedirs(data_path)
+                data_path += '/'
+                for i,x in enumerate(self.dataset):
+                    if isinstance(x,np.ndarray):
+                        np.save(data_path + self.info['file_name'][i] + '.npy', x)
+                    elif x == None:
+                        shutil.copyfile(
+                            self.save_path+self.load_name+'/'+self.info['file_name'][i]+'.npy',
+                            data_path + self.info['file_name'][i]+'.npy'
+                            )
+                    else:
+                        raise ValueError
+            else:
+                data_path = self.save_path + 'DataSet_' + self.name
+                origin_files = os.listdir(self.save_path + self.load_name + '/')
+                origin_files = [x[:-4] for x in origin_files if '.npy' in x]
+                add_list = list(set(self.info['file_name']) - set(origin_files))
+                del_list = list(set(origin_files) - set(self.info['file_name']))
+                for x in add_list:
+                    save_data = self.dataset[self.info['file_name'].index(x)]
+                    assert save_data != None
+                    np.save(data_path + x + '.npy', save_data)
+                for x in del_list:
+                    os.remove(self.save_path + self.load_name + '/' + x + '.npy')
+        else:
+            pickle.dump(self.dataset, open(self.save_path + 'DataSet_' +
+                                        self.name + '.pkl', 'wb'), True)
+        pd.DataFrame(self.info).to_csv(self.save_path + 'DataSet_' + self.name + 'info.csv')
         print('dataset ', self.name, ' has benn saved\n')
-
-    def _save_info(self):
-        '''
-        Save this DataSet' information as .csv file in the save_path.
-        
-        Args:
-            None
-        Return:
-            None
-        '''
-        assert self.name != ''
-        assert self.save_path != ''
-        info = OrderedDict()
-        for attr in self.index:
-            info[attr] = self.get_value_attribute(attr)
-            if isinstance(info[attr][0],np.ndarray) and len(info[attr][0])>1:
-                for i,x in enumerate(info[attr]):
-                    info[attr][i] = x.shape
-            if not isinstance(info[attr][0],str) and len(info[attr][0]) > 2:
-                for i,x in enumerate(info[attr]):
-                    info[attr][i] = len(x)
-
-        pd.DataFrame(info).to_csv(self.save_path + 'DataSet_' + self.name + 'info.csv',index=False)
 
     def load(self,name=''):
         '''
@@ -309,12 +304,24 @@ class DataSet(object):
         assert self.name != ''
         assert self.save_path != ''
         full_name = self.save_path + 'DataSet_' + self.name + '.pkl'
-        load_class = pickle.load(open(full_name, 'rb'))
-        assert load_class.name == self.name
-        assert load_class.save_path == self.save_path
+        if os.path.exists(full_name):
+            self.dataset = pickle.load(open(full_name, 'rb'))
+            self.info = OrderedDict(pd.read_csv(self.save_path + 'DataSet_' + self.name + 'info.csv'))
+            for k in self.info.keys():
+                self.info[k] = list(self.info[k])
+            self.len_data = self.info.pop(list(self.info.keys())[0])[-1] + 1
+            self.save_in_piece = False
+        elif os.path.exists(full_name[:-4]):
+            self.info = OrderedDict(pd.read_csv(self.save_path + 'DataSet_' + self.name + 'info.csv'))
+            for k in self.info.keys():
+                self.info[k] = list(self.info[k])
+            self.len_data = self.info.pop(list(self.info.keys())[0])[-1] + 1
+            self.save_in_piece = True
+            self.dataset = [None]*self.len_data
+            self.load_name = name
+        else:
+            raise ValueError('required dataset does not exist!')
         print('dataset ', self.name, ' has been load')
-        self.dataset = load_class.dataset
-        self.index = load_class.index
 
     @staticmethod
     def load_dataset(name):
@@ -326,11 +333,9 @@ class DataSet(object):
         Return:
             DataSet
         '''
-        save_path = './data/'
-        full_name = save_path + 'DataSet_' + name + '.pkl'
-        load_class = pickle.load(open(full_name,'rb'))
-        print('dataset ', name, ' has been load')
-        return load_class
+        r_dataset = DataSet()
+        r_dataset.load(name)
+        return r_dataset
 
 def make_phm_dataset():
     RUL_dict = {'Bearing1_1':0,'Bearing1_2':0,
@@ -366,29 +371,28 @@ def make_phm_dataset():
     phm_dataset.save()
 
 def make_paderborn_dataset():
+    info = OrderedDict()
+    info['file_name'] = []
+    info['load'] = []
+    info['speed'] = []
+    info['fault_place'] = []
+    info['fault_cause'] = []
+    info['state'] = []
+    info['No'] = []
     paderborn_dataset = DataSet(
         name='paderborn_data',
-        index=[
-            'bearing_name',
-            'load',
-            'speed',
-            'fault_place',
-            'fault_cause',
-            'state',
-            'No',
-            'data'
-        ]
+        info=info
     )
     source_path = 'E:/cyh/data_sum/temp/德data/dataset/'
     artificial_fault = ['KI01','KI03','KI05','KI07','KI08',
                 'KA01','KA03','KA05','KA06','KA07']
     state = {
         'K001':'>50',
-        'K002':19,
-        'K003':1,
-        'K004':5,
-        'K005':10,
-        'K006':16,
+        'K002':'19',
+        'K003':'1',
+        'K004':'5',
+        'K005':'10',
+        'K006':'16',
         'KA01':'EMD',
         'KA03':'Electric Engraver',
         'KA05':'Electric Engraver',
@@ -425,19 +429,19 @@ def make_paderborn_dataset():
         temp_data = temp_data[0][0][0][6][2][0]
         temp_fault_cause = 'artificial' if file_name[12:16] in artificial_fault else 'real'
         temp_append_sample = [
-            file_name,
+            temp_data,
+            file_name.replace('.mat',''),
             file_name[4:11],
             file_name[0:3],
             file_name[12:16],
             temp_fault_cause,
             state[file_name[12:16]],
-            file_name[17:],
-            temp_data
+            file_name[17:].replace('.mat','')
         ]
         paderborn_dataset.append(temp_append_sample)
         print(file_name,'has been appended.')
 
-    paderborn_dataset.save()
+    paderborn_dataset.save(piece=True)
 
 def make_ims_dataset():
     fault_bearing = {'1st_test':OrderedDict({4:'3_x',5:'3_y',6:'4_x',7:'4_y'}), '2nd_test':[0], '4th_test':[2]}
@@ -481,14 +485,12 @@ def make_ims_dataset():
 
     ims_dataset.save()
 
-            
-
 
 if __name__ == '__main__':
     # make_phm_dataset()
     # dataset = DataSet.load_dataset('phm_data')
     # dataset._save_info()
-    # make_paderborn_dataset()
+    make_paderborn_dataset()
     # make_ims_dataset()
-    dataset = DataSet.load_dataset('ims_data')
+    # dataset = DataSet.load_dataset('ims_data')
     print('1')
