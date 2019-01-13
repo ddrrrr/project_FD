@@ -344,9 +344,13 @@ def make_phm_dataset():
                 'Bearing1_3':573,'Bearing1_4':33.9,'Bearing1_5':161,'Bearing1_6':146,'Bearing1_7':757,
                 'Bearing2_3':753,'Bearing2_4':139,'Bearing2_5':309,'Bearing2_6':129,'Bearing2_7':58,
                 'Bearing3_3':82}
+    info = OrderedDict()
+    info['bearing_name'] = []
+    info['RUL'] = []
+    info['quantity'] = []
     phm_dataset = DataSet(name='phm_data',
-                        index=['bearing_name','RUL','quantity','data'])
-    source_path = './PHM/'
+                        info=info)
+    source_path = 'E:/cyh/119cyh_copy/cyh/temp/PHM/'
     for path_1 in ['Learning_set/','Test_set/']:
         bearings_names = os.listdir(source_path + path_1)
         bearings_names.sort()
@@ -365,7 +369,7 @@ def make_phm_dataset():
                     else:
                         bearing_data = np.append(bearing_data,data,axis=0)
         
-            phm_dataset.append([bearings_name,RUL_dict[bearings_name],bearing_data.shape[0],bearing_data])
+            phm_dataset.append([bearing_data,bearings_name,RUL_dict[bearings_name],bearing_data.shape[0]])
             print(bearings_name,'has been appended.')
 
     phm_dataset.save()
@@ -490,7 +494,8 @@ if __name__ == '__main__':
     # make_phm_dataset()
     # dataset = DataSet.load_dataset('phm_data')
     # dataset._save_info()
-    make_paderborn_dataset()
+    make_phm_dataset()
+    # make_paderborn_dataset()
     # make_ims_dataset()
     # dataset = DataSet.load_dataset('ims_data')
     print('1')
