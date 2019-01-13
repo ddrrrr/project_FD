@@ -447,55 +447,44 @@ def make_paderborn_dataset():
 
     paderborn_dataset.save(piece=True)
 
-def make_ims_dataset():
-    fault_bearing = {'1st_test':OrderedDict({4:'3_x',5:'3_y',6:'4_x',7:'4_y'}), '2nd_test':[0], '4th_test':[2]}
-    ims_dataset = DataSet(name='ims_data', index=['set_No','bearing_No','record_time','data'])
-    source_path = 'E:/cyh/data_sum/temp/IMS data/'
+def make_cwru_dataset():
+    info = OrderedDict()
+    info['name'] = []
+    info['load'] = []
+    info['inner_code'] = []
+    cwru_dataset = DataSet(
+        name='cwru_data',
+        info=info
+    )
+    source_path = 'E:/cyh/119cyh_copy/cyh/temp/cwru_data/'
+    for s_path in ['normal/','fault_data/']:
+        file_names = os.listdir(source_path+s_path)
+        file_names.sort()
+        for file_name in file_names:
+            if '.mat' in file_name:
+                temp_dict = sio.loadmat(source_path+s_path+file_name)
+                for k in temp_dict.keys():
+                    if '_time' in k:
+                        if k not in cwru_dataset.info['inner_code']:
+                            temp_append_sample = [
+                                temp_dict[k],
+                                file_name[:-4],
+                                file_name[-5:-4],
+                                k
+                            ]
+                            cwru_dataset.append(temp_append_sample)
+                print(file_name,'has been appended.')
 
-    for dir_name in fault_bearing.keys():
-        # if isinstance(fault_bearing[dir_name],dict):
-        #     all_samples = []
-        #     for k in fault_bearing[dir_name].keys():
-        #         all_samples.append([dir_name, fault_bearing[dir_name][k], [], []])
-        if isinstance(fault_bearing[dir_name], dict):
-            channels = list(fault_bearing[dir_name].keys())
-        elif isinstance(fault_bearing[dir_name], list):
-            channels = fault_bearing[dir_name]
-        record_time = []
-        record_data = np.array([])
+    cwru_dataset.save()
 
-        names = os.listdir(source_path + dir_name + '/')
-        names.sort()
-        for name in names:
-            print(name)
-            record_time.append(name.replace('.txt',''))
-            temp_data = np.loadtxt(source_path + dir_name + '/' + name)
-            if record_data.size == 0:
-                record_data = temp_data[:,channels][np.newaxis,:,:]
-            else:
-                record_data = np.append(record_data, temp_data[:,channels][np.newaxis,:,:], axis=0)
-        
-        if isinstance(fault_bearing[dir_name], dict):
-            append_samples = []
-            for i,k in enumerate(fault_bearing[dir_name].keys()):
-                append_samples.append([dir_name, fault_bearing[dir_name][k], record_time, record_data[:,:,i]])
-        elif isinstance(fault_bearing[dir_name], list):
-            append_samples = []
-            for i,x in enumerate(fault_bearing[dir_name]):
-                append_samples.append([dir_name, str(x), record_time, record_data[:,:,i]])
-
-        for sample in append_samples:
-            ims_dataset.append(sample)
-
-    ims_dataset.save()
 
 
 if __name__ == '__main__':
     # make_phm_dataset()
     # dataset = DataSet.load_dataset('phm_data')
     # dataset._save_info()
-    make_phm_dataset()
+    # make_phm_dataset()
     # make_paderborn_dataset()
-    # make_ims_dataset()
-    # dataset = DataSet.load_dataset('ims_data')
+    # make_cwru_dataset()
+    # dataset = DataSet.load_dataset('cwru_data')
     print('1')
