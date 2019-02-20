@@ -48,10 +48,12 @@ class DataSet(object):
         Return:
             conforming_idx: A list contained index of samples whose attributes is in condition.
         '''
-
-        idx_all = []
-        for k in condition.keys():
-            idx_all.append(set([i for i,x in enumerate(self.info[k]) if x in condition[k]]))
+        if condition == 'all':
+            idx_all = [i for i in range(self.dataset)]
+        else:
+            idx_all = []
+            for k in condition.keys():
+                idx_all.append(set([i for i,x in enumerate(self.info[k]) if x in condition[k]]))
         return list(set.intersection(*idx_all))
 
     # modify
