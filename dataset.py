@@ -135,9 +135,9 @@ class DataSet(object):
         '''
         conforming_idx = self._deal_condition(condition)
         keep_idx = list(set([i for i in range(self.len_data)]) - set(conforming_idx))
-        self.dataset = self.dataset[keep_idx]
+        self.dataset = [self.dataset[x] for x in keep_idx]
         for k in range(self.info.keys()):
-            self.info[k] = self.info[k][keep_idx]
+            self.info[k] = [self.info[k][x] for x in keep_idx]
 
     # get information or values
     def _get_data(self,idx_list):
@@ -155,7 +155,7 @@ class DataSet(object):
                 r_data.append(np.load(data_path + self.info['file_name'][i] + '.npy'))
             return r_data
         else:
-            return self.dataset[idx_list]
+            return [self.dataset[x] for x in idx_list]
 
     def get_value_attribute(self,attribute):
         '''
@@ -188,7 +188,7 @@ class DataSet(object):
             return self._get_data(conforming_idx)
         else:
             try:
-                return self.info[attribute][conforming_idx]
+                return [self.info[attribute][x] for x in conforming_idx]
             except KeyError:
                 raise ValueError('The given attribute does not exist in index, and the attributes of this dataset \
                     is '+ str(list(self.info.keys())))
@@ -206,7 +206,7 @@ class DataSet(object):
         temp_data = self._get_data(conforming_idx)
         temp_info = OrderedDict()
         for k in self.info.keys():
-            temp_info[k] = self.info[k][conforming_idx]
+            temp_info[k] = [self.info[k][x] for x in conforming_idx]
         temp_len_data = len(conforming_idx)
         return DataSet(name='temp',info=temp_info,dataset=temp_data,len_data=temp_len_data,load_name=self.load_name)
 
@@ -308,16 +308,16 @@ class DataSet(object):
         full_name = self.save_path + 'DataSet_' + self.name + '.pkl'
         if os.path.exists(full_name):
             self.dataset = pickle.load(open(full_name, 'rb'))
-            self.info = OrderedDict(pd.read_csv(self.save_path + 'DataSet_' + self.name + 'info.csv'))
+            self.info = OrderedDict(pd.read_csv(self.save_path + 'DataSet_' + self.name + 'info.csv',dtype=str))
             for k in self.info.keys():
                 self.info[k] = list(self.info[k])
-            self.len_data = self.info.pop(list(self.info.keys())[0])[-1] + 1
+            self.len_data = int(self.info.pop(list(self.info.keys())[0])[-1]) + 1
             self.save_in_piece = False
         elif os.path.exists(full_name[:-4]):
-            self.info = OrderedDict(pd.read_csv(self.save_path + 'DataSet_' + self.name + 'info.csv'))
+            self.info = OrderedDict(pd.read_csv(self.save_path + 'DataSet_' + self.name + 'info.csv',dtype=str))
             for k in self.info.keys():
                 self.info[k] = list(self.info[k])
-            self.len_data = self.info.pop(list(self.info.keys())[0])[-1] + 1
+            self.len_data = int(self.info.pop(list(self.info.keys())[0])[-1]) + 1
             self.save_in_piece = True
             self.dataset = [None]*self.len_data
             self.load_name = name
