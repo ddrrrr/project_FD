@@ -10,7 +10,7 @@ from multiprocessing.dummy import Pool as ThreadPool
 class WDCNN_Net(nn.Module):
     def __init__(self,d_rate=0.5):
         super(WDCNN_Net, self).__init__()
-        self.first_cnn = nn.Conv1d(1,16,64,16,24)
+        self.first_cnn = nn.Conv1d(1,16,64,8,28)
         self.cnn_net = nn.Sequential(
             nn.BatchNorm1d(16),
             nn.ReLU(),
@@ -27,14 +27,14 @@ class WDCNN_Net(nn.Module):
             nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.MaxPool1d(2),
+            nn.Conv1d(64,64,3,1,1),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.MaxPool1d(2),
             nn.Conv1d(64,64,3),
             nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.MaxPool1d(2),
-            # nn.Conv1d(64,64,3,1,1),
-            # nn.BatchNorm1d(64),
-            # nn.ReLU(),
-            # nn.MaxPool1d(2),
         )
         self.FC_net = nn.Sequential(
             nn.Conv1d(64*3,100,1,bias=False),
@@ -57,15 +57,16 @@ class WDCNN():
     def __init__(self):
         self.piece_length = 2048
         self.dataset = DataSet.load_dataset(name='cwru_data')
-        self.lr = 1e-3
-        self.epochs = 100
+        self.lr = 0.015
+        self.epochs = 1000
         self.batches = 100
-        self.batch_size = 8
+        self.batch_size = 100
 
     def train(self):
-        train_data,train_label = self._preprocess('0hp')
-        test_data,test_label = self._preprocess('1hp')
+        train_data,train_label = self._preprocess('3hp')
+        test_data,test_label = self._preprocess('2hp')
         wdcnn = WDCNN_Net().cuda()
+        wdcnn.apply(self._weights_init)
         optimizer = optim.Adam(wdcnn.parameters(), lr=self.lr)
 
         for e in range(1, self.epochs+1):
@@ -76,6 +77,12 @@ class WDCNN():
 
     def test(self):
         pass
+
+    def _weights_init(self,m):
+        if isinstance(m, nn.Conv1d):
+            nn.init.normal_(m.weight.data,mean=0,std=0.1)
+            if isinstance(m.bias, torch.nn.parameter.Parameter):
+                nn.init.constant_(m.bias.data, val=0.1)
 
     def _preprocess(self, select):
         if select == '0hp':
@@ -112,26 +119,26 @@ class WDCNN():
         return temp_data, temp_label
 
     def _fit(self, e, model, optimizer, train_iter, drop_rate=[0.1,0.9]):
-        def _get_random_sample(data):
-            random_idx = random.randint(0,len(data)-self.piece_length)
-            r_data = np.reshape(data[random_idx:random_idx+self.piece_length],(1,-1))
-            r_data = (r_data - np.min(r_data)) / (np.max(r_data) - np.min(r_data))
-            return r_data
-        
         model.train()
         total_loss = 0
         correct = 0
         total = 0
 
+        label_all = [()]*10
+        for i,x in enumerate(train_iter[1]):
+            label_all[x] += (i,)
+
         for batch in range(self.batches):
-            random_idx = np.random.randint(0,len(train_iter[0]),size=self.batch_size)
-            pool = ThreadPool()
-            data = pool.map(_get_random_sample,[train_iter[0][x] for x in random_idx])
-            pool.close()
-            pool.join()
-            label = [np.reshape(train_iter[1][x],(1,-1)) for x in random_idx]
+            label = np.random.randint(0,10,size=self.batch_size)
+            random_idx = [random.choice(label_all[x]) for x in label]
+            label = label.reshape(1,-1)
+            
+            random_start = [random.randint(0,len(train_iter[0][x])-self.piece_length) for x in random_idx]
+            data = [train_iter[0][random_idx[i]][random_start[i]:random_start[i]+self.piece_length].reshape(1,-1) for i in range(self.batch_size)]
 
             data, label = np.concatenate(data,axis=0), np.concatenate(label,axis=0)
+            data = (data - np.repeat(np.min(data,axis=1,keepdims=True),self.piece_length,axis=1)) / \
+                    np.repeat(np.max(data,axis=1,keepdims=True)-np.min(data,axis=1,keepdims=True),self.piece_length,axis=1)
             data = data[:,np.newaxis,:]
             label = label.reshape(-1,)
             data, label = torch.from_numpy(data.copy()), torch.from_numpy(label.copy())
@@ -143,7 +150,6 @@ class WDCNN():
             total += label.size(0)
             correct += (predicted == label).sum().item()
             loss = F.cross_entropy(output,label)
-            # loss = F.l1_loss(output,label)
             loss.backward()
             optimizer.step()
             total_loss += loss.data
@@ -151,26 +157,26 @@ class WDCNN():
         return total_loss / self.batches, correct / total
         
     def _evaluate(self, model, val_iter):
-        def _get_random_sample(data):
-            random_idx = random.randint(0,len(data)-self.piece_length)
-            r_data = np.reshape(data[random_idx:random_idx+self.piece_length],(1,-1))
-            r_data = (r_data - np.min(r_data)) / (np.max(r_data) - np.min(r_data))
-            return r_data
-        
         model.eval()
         total_loss = 0
         correct = 0
         total = 0
 
+        label_all = [()]*10
+        for i,x in enumerate(val_iter[1]):
+            label_all[x] += (i,)
+
         for batch in range(self.batches):
-            random_idx = np.random.randint(0,len(val_iter[0]),size=self.batch_size)
-            pool = ThreadPool()
-            data = pool.map(_get_random_sample,[val_iter[0][x] for x in random_idx])
-            pool.close()
-            pool.join()
-            label = [np.reshape(val_iter[1][x],(1,-1)) for x in random_idx]
+            label = np.random.randint(0,10,size=self.batch_size)
+            random_idx = [random.choice(label_all[x]) for x in label]
+            label = label.reshape(1,-1)
+
+            random_start = [random.randint(0,len(val_iter[0][x])-self.piece_length) for x in random_idx]
+            data = [val_iter[0][random_idx[i]][random_start[i]:random_start[i]+self.piece_length].reshape(1,-1) for i in range(self.batch_size)]
 
             data, label = np.concatenate(data,axis=0), np.concatenate(label,axis=0)
+            data = (data - np.repeat(np.min(data,axis=1,keepdims=True),self.piece_length,axis=1)) / \
+                    np.repeat(np.max(data,axis=1,keepdims=True)-np.min(data,axis=1,keepdims=True),self.piece_length,axis=1)
             data = data[:,np.newaxis,:]
             label = label.reshape(-1,)
             data, label = torch.from_numpy(data.copy()), torch.from_numpy(label.copy())
@@ -181,7 +187,6 @@ class WDCNN():
             total += label.size(0)
             correct += (predicted == label).sum().item()
             loss = F.cross_entropy(output,label)
-            # loss = F.l1_loss(output,label)
             total_loss += loss.data
             torch.cuda.empty_cache()        #empty useless variable
         return total_loss / self.batches, correct / total
